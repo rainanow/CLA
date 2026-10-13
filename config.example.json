@@ -1,0 +1,14 @@
+{
+  "_说明": "可选配置模板。当前版本通过命令行参数配置，本文件仅作参数备忘，不会被自动读取。",
+  "db": "examples/sample.db",
+  "out": "/tmp/chatlog-out",
+  "api_key": "sk-xxx 或使用环境变量 DEEPSEEK_API_KEY",
+  "base_url": "https://api.deepseek.com",
+  "model": "deepseek-flash",
+  "workers": 5,
+  "_参数说明": {
+    "model": "需支持 JSON 输出。默认 deepseek-flash（DeepSeek-V4.1-Flash）",
+    "workers": "并发窗口数，只影响速度不影响结果；deepseek-flash 并发上限 2500",
+    "out": "输出根目录，将自动创建 data/ results/ 输出/ 三个子目录"
+  }
+}

@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+*.zip
+/tmp/
+out/
+data/
+results/
+输出/
+.env
