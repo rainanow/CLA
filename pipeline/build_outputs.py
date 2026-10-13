@@ -132,6 +132,13 @@ HTML_TEMPLATE = r'''<!DOCTYPE html>
   .tl-wrap { background:#fff; border-radius:10px; padding:18px; box-shadow:0 1px 4px rgba(0,0,0,.08); overflow-x:auto; }
   .tl-label { font-size:12px; fill:#34495e; }
   text.tl-ev { font-size:11px; fill:#2c3e50; }
+  .tl-ctrl { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin:6px 0 12px; font-size:13px; }
+  .tl-ctrl button { border:1px solid #dfe4ea; background:#fff; color:#2c3e50; border-radius:6px; padding:5px 12px; cursor:pointer; font-size:13px; }
+  .tl-ctrl button.active { background:#2c3e50; color:#fff; border-color:#2c3e50; }
+  .tl-ctrl .sep { width:1px; height:18px; background:#dfe4ea; margin:0 4px; }
+  .tl-ctrl .hint { color:#95a5a6; font-size:12px; }
+  circle.tl-hit { cursor:pointer; }
+  circle.tl-hit:hover { stroke:#2c3e50; stroke-width:2; }
 </style>
 </head>
 <body>
@@ -148,7 +155,8 @@ HTML_TEMPLATE = r'''<!DOCTYPE html>
 <div class="stats" id="stats"></div>
 <div id="cals"></div>
 <h2>大事件时间轴</h2>
-<div class="tl-wrap"><svg id="tl" height="420"></svg></div>
+<div class="tl-ctrl" id="tlCtrl"></div>
+<div class="tl-wrap" id="tlWrap"><svg id="tl" height="620"></svg></div>
 <div class="tip" id="tip"></div>
 <script>
 const DATA = __DATA__;
@@ -223,36 +231,134 @@ const OPACITY = [0, .22, .45, .68, .85, 1];
   });
 })();
 
+// ---- 大事件时间轴：年份筛选 + 缩放 + 自动避让排布 ----
 (function(){
   const svg = document.getElementById('tl');
-  const W = Math.max(1200, DATA.length*1.2); svg.setAttribute('width', W);
-  const M = 60, H = 420, axisY = H/2;
-  const t0 = new Date(DATA[0].d).getTime(), t1 = new Date(DATA[DATA.length-1].d).getTime();
-  const x = ds => M + (new Date(ds).getTime()-t0)/(t1-t0)*(W-2*M);
-  let s = `<line x1="${M}" y1="${axisY}" x2="${W-M}" y2="${axisY}" stroke="#bdc3c7" stroke-width="2"/>`;
-  const startY = new Date(DATA[0].d); startY.setMonth(startY.getMonth()+1);
-  for(let y=startY.getFullYear(); y<=new Date(t1).getFullYear(); y++){
-    for(let m=0;m<12;m++){
-      const dt=new Date(y,m,1); if(dt.getTime()<=t0||dt.getTime()>=t1) continue;
-      if(m%3===0){ const xx=x(dt.toISOString().slice(0,10));
-        s+=`<line x1="${xx}" y1="${axisY-6}" x2="${xx}" y2="${axisY+6}" stroke="#95a5a6"/>`;
-        s+=`<text class="tl-label" x="${xx}" y="${axisY+22}" text-anchor="middle">${y}.${m+1}</text>`; }
+  const ctrl = document.getElementById('tlCtrl');
+  const tipEl = document.getElementById('tip');
+  const LANE_H = 26, MAX_LANE = 10, GAP = 14;
+  let ppd = 10, year = 'all';
+
+  const esc = s => String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+  const events = [];
+  DATA.forEach(r => (r.big || []).forEach(b => events.push({d: r.d, t: b.t, p: r.p, i: r.i, s: r.s})));
+  events.sort((a, b) => a.d < b.d ? -1 : (a.d > b.d ? 1 : 0));
+  const years = [...new Set(DATA.map(x => x.d.slice(0, 4)))];
+
+  function bounds(){
+    if (year === 'all'){
+      const t0 = new Date(DATA[0].d + 'T00:00:00').getTime();
+      const t1 = new Date(DATA[DATA.length-1].d + 'T00:00:00').getTime() + 86400000;
+      return {t0, t1};
     }
+    return {t0: new Date(year + '-01-01T00:00:00').getTime(),
+            t1: new Date((Number(year)+1) + '-01-01T00:00:00').getTime()};
   }
-  let up=0, down=0;
-  DATA.filter(r=>r.big.length).forEach(r=>{
-    const xx=x(r.d), pos=r.p!=='负';
-    const yy=pos?axisY-14-down*26:axisY+14+up*26;
-    if(pos)up=(up+1)%7; else down=(down+1)%7;
-    const c=pos?'var(--pos)':'var(--neg)';
-    s+=`<line x1="${xx}" y1="${axisY}" x2="${xx}" y2="${yy}" stroke="${c}" stroke-width="1" opacity=".5"/>`;
-    s+=`<circle cx="${xx}" cy="${yy}" r="5" fill="${c}"><title>${r.d} ${r.big.map(b=>b.t).join('；')}</title></circle>`;
-    if(r.big.length===1||r.i>=4){
-      const label=r.big.map(b=>b.t).join('；').slice(0,14);
-      s+=`<text class="tl-ev" x="${xx}" y="${yy+(pos?-8:14)}" text-anchor="middle" opacity=".85">${label}</text>`;
+
+  function renderCtrl(visCount){
+    ctrl.innerHTML =
+      '<span>范围</span>' +
+      ['all'].concat(years).map(y =>
+        `<button data-year="${y}" class="${y === year ? 'active' : ''}">${y === 'all' ? '全部' : y}</button>`).join('') +
+      '<span class="sep"></span><span>缩放</span>' +
+      [[4,'紧凑'],[10,'标准'],[22,'宽松']].map(([v, n]) =>
+        `<button data-ppd="${v}" class="${v === ppd ? 'active' : ''}">${n}</button>`).join('') +
+      `<span class="hint">此范围含 ${visCount} 个大事件 · 横向滚动查看 · 悬停看详情</span>`;
+    ctrl.querySelectorAll('button').forEach(btn => {
+      btn.onclick = () => {
+        if (btn.dataset.year !== undefined) year = btn.dataset.year;
+        if (btn.dataset.ppd !== undefined) ppd = Number(btn.dataset.ppd);
+        render();
+      };
+    });
+  }
+
+  function render(){
+    const {t0, t1} = bounds();
+    const days = (t1 - t0) / 86400000;
+    const M = 60, axisY = 300, H = 620;
+    const W = Math.max(720, Math.round(M * 2 + days * ppd));
+    svg.setAttribute('width', W);
+    svg.setAttribute('height', H);
+    const x = ds => M + (new Date(ds + 'T00:00:00').getTime() - t0) / 86400000 * ppd;
+    const vis = events.filter(e => {
+      const v = new Date(e.d + 'T00:00:00').getTime();
+      return v >= t0 && v < t1;
+    });
+
+    let s = '';
+    // 季度刻度，年初加粗
+    let cur = new Date(t0);
+    cur = new Date(cur.getFullYear(), Math.floor(cur.getMonth() / 3) * 3, 1);
+    while (cur.getTime() < t1){
+      const xx = M + (cur.getTime() - t0) / 86400000 * ppd;
+      if (xx >= M - 1 && xx <= W - M + 1){
+        const isJan = cur.getMonth() === 0;
+        s += `<line x1="${xx}" y1="${axisY - 8}" x2="${xx}" y2="${axisY + 8}" stroke="${isJan ? '#7f8c8d' : '#c8d0d8'}" stroke-width="${isJan ? 1.6 : 1}"/>`;
+        s += `<text class="tl-label" x="${xx}" y="${H - 24}" text-anchor="middle" opacity="${isJan ? 1 : .6}">${cur.getFullYear()}.${cur.getMonth() + 1}</text>`;
+      }
+      cur = new Date(cur.getFullYear(), cur.getMonth() + 3, 1);
     }
-  });
-  svg.innerHTML=s;
+    s += `<line x1="${M}" y1="${axisY}" x2="${W - M}" y2="${axisY}" stroke="#bdc3c7" stroke-width="2"/>`;
+
+    // 上下两侧分别避让：同侧相邻竖线至少间隔 GAP 像素，撞不下就换 lane
+    const lanes = {pos: [], neg: []};
+    const placed = [];
+    vis.forEach(e => {
+      const side = e.p === '负' ? 'neg' : 'pos';
+      const xx = x(e.d);
+      let li = lanes[side].findIndex(end => end + GAP <= xx);
+      if (li === -1){
+        if (lanes[side].length < MAX_LANE){ lanes[side].push(-Infinity); li = lanes[side].length - 1; }
+        else { li = lanes[side].indexOf(Math.min.apply(null, lanes[side])); }
+      }
+      lanes[side][li] = xx;
+      placed.push({
+        e, side, lane: li, x: xx,
+        y: side === 'pos' ? axisY - 18 - li * LANE_H : axisY + 18 + li * LANE_H,
+        color: side === 'pos' ? 'var(--pos)' : 'var(--neg)',
+        idx: placed.length,
+      });
+    });
+
+    // 常驻标签：同一 lane 内有空间才画，放不下就只留悬停
+    const lastRight = {};
+    const labeled = new Set();
+    placed.slice().sort((a, b) => a.x - b.x).forEach(p => {
+      const key = p.side + '-' + p.lane;
+      const text = p.e.t.length > 10 ? p.e.t.slice(0, 10) + '…' : p.e.t;
+      const w = text.length * 11.5 + 6;
+      if ((lastRight[key] === undefined ? -1e9 : lastRight[key]) + 6 <= p.x - w / 2){
+        lastRight[key] = p.x + w / 2;
+        labeled.add(p.idx);
+        p.labelText = text;
+      }
+    });
+
+    placed.forEach(p => {
+      s += `<line x1="${p.x}" y1="${axisY}" x2="${p.x}" y2="${p.y}" stroke="${p.color}" stroke-width="1" opacity=".45"/>`;
+      if (labeled.has(p.idx)){
+        s += `<text class="tl-ev" x="${p.x}" y="${p.y + (p.side === 'pos' ? -9 : 15)}" text-anchor="middle">${esc(p.labelText)}</text>`;
+      }
+      s += `<circle class="tl-hit" data-idx="${p.idx}" cx="${p.x}" cy="${p.y}" r="5" fill="${p.color}"/>`;
+    });
+
+    svg.innerHTML = s;
+    svg.querySelectorAll('.tl-hit').forEach(c => {
+      const p = placed[Number(c.dataset.idx)];
+      c.onmousemove = ev => {
+        tipEl.innerHTML = `<b>${p.e.d}</b> · 浓度${p.e.i} · ${p.e.p}<br>${esc(p.e.t)}` +
+          (p.e.s ? `<br><span style="opacity:.85">${esc(p.e.s.slice(0, 80))}</span>` : '');
+        tipEl.style.display = 'block';
+        tipEl.style.left = Math.min(ev.clientX + 14, innerWidth - 340) + 'px';
+        tipEl.style.top = (ev.clientY + 14) + 'px';
+      };
+      c.onmouseleave = () => { tipEl.style.display = 'none'; };
+    });
+
+    renderCtrl(vis.length);
+  }
+  render();
 })();
 </script>
 </body>
