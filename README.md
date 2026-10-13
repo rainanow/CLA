@@ -10,6 +10,7 @@
 **看见一段关系的时间形状——哪几天在吵，哪几天在笑，几年是怎么走过来的。**
 
 [![license](https://img.shields.io/badge/license-MIT-f4c430?style=flat-square)](LICENSE)
+[![release](https://img.shields.io/github/v/release/rainanow/CLA?style=flat-square&color=4D6BFE)](https://github.com/rainanow/CLA/releases)
 [![Python](https://img.shields.io/badge/Python-3.11+-3776AB?style=flat-square&logo=python&logoColor=white)](#快速开始)
 [![model](https://img.shields.io/badge/model-deepseek--flash-4D6BFE?style=flat-square)](#成本与耗时)
 [![dependencies](https://img.shields.io/badge/dependencies-1%20(httpx)-brightgreen?style=flat-square)](requirements.txt)
@@ -44,7 +45,18 @@
 
 ### 准备环境
 
-需要 Python 3.11+，只有一个依赖：
+**方式一：下载打包版**
+
+从 [Releases](https://github.com/rainanow/CLA/releases/latest) 下载 `CLA-vx.y.z.zip`，解压即用，无需 git。
+
+**方式二：克隆仓库**
+
+```bash
+git clone https://github.com/rainanow/CLA.git
+cd CLA
+```
+
+两种方式都只需要 Python 3.11+，且只有一个依赖：
 
 ```bash
 pip install -r requirements.txt
